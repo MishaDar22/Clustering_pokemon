@@ -1,0 +1,402 @@
+---
+title: "Clustering Pokemon"
+author: "Mikhail Darakhovich"
+output: 
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r}
+library(dplyr)
+library(dbscan)
+library(fpc)
+library(cluster)
+library(factoextra)
+```
+
+```{r}
+download.file('http://staff.ii.pw.edu.pl/~rbembeni/dane/Pokemon.csv','Pokemon.csv')
+pokemon <- read.csv("Pokemon.csv", na.strings = c("", "NA"))
+```
+# 1. Przygotowanie danych do grupowania
+```{r}
+dim(pokemon)
+View(pokemon)
+summary(pokemon)
+```
+```{r}
+#sprawdzamy braki danych 
+sum(is.na(pokemon))
+```
+tylko w atrybucie Type.2 mamy 386 brakujące wartości
+
+```{r}
+#sprawdźmy typy atrybutów
+str(pokemon)
+```
+atrybuty X., Name, Type.1, Type.2, Legendary mają typ Factor, pozostałe mają typ liczbowy.
+
+```{r}
+#sprawdźmy ile mamy typów pokemonów
+table(pokemon$Type.1)
+length(unique(pokemon$Type.1))
+```
+mamy 18 typów, czyli 18 ewentualnych grup, które moglibyśmy dostać po grupowaniu danych.
+
+```{r}
+#przygotujmy dane do grupowania
+#robimy dataset z atrybutami, na podstawie których będziemy grupować dane. Usuwamy wszystkie atrybuty typu Factor oraz atrybut X. i Generation:
+names(pokemon)
+#zróbmy dla eksperymentu 2 dasety z 6 oraz 3 atrybutami
+pokemon_ex_1 <- select(pokemon, HP, Attack, Defense, Sp..Atk, Sp..Def, Speed) # dataset z 6 atrybutami
+pokemon_ex_2 <- select(pokemon, HP, Attack, Defense) # dataset z 3 atrybutami
+```
+
+# 2. Grupowanie algorytmem partycjonującym
+```{r}
+#dla eksperymentu zróbmy grupowanie za pomocą metody k-means z podziałem na 18 grup
+#najpierw weźmiemy dataset z 6 atrybutami
+
+#sprawdzimy, czy na podstawie danych atrybutów można poprawnie pogrupować dane
+set.seed(1111)
+pokemon_ex_1.kmeans = kmeans(pokemon_ex_1, 18, iter.max = 20, nstart=20)
+print(pokemon_ex_1.kmeans)
+```
+Wg wskaznika between_SS / total_SS  jakość grupowania jest 71.9 %
+
+```{r}
+#porównianie uzyskanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(pokemon$Type.1, pokemon_ex_1.kmeans$cluster)
+```
+Jakość grupowania jest zła. Widzimy,  że jeden typ pokemona jest przypisany do wielu grup. 
+
+```{r}
+# zróbmy wykres z pogrupowanymi danymi używając 2 pierwsze atrybuty
+plot(pokemon_ex_1[1:2], col = pokemon_ex_1.kmeans$cluster)
+```
+
+```{r}
+#dla zwiększenia skuteczności grupowania zeskalujmy dane i wykonujmy jeszcze raz grupowanie
+set.seed(1111)
+pokemon_ex_1_Scale <- scale(pokemon_ex_1, center = FALSE)
+pokemon_ex_1_Scale <- as.data.frame(pokemon_ex_1_Scale)
+pokemon_ex_1.kmeans_Sc = kmeans(pokemon_ex_1_Scale, 18, iter.max = 20,nstart = 20)
+print(pokemon_ex_1.kmeans_Sc)
+```
+Wskaźnik between_SS / total_SS jest 71.8 % i jest podobny do poprzedniego eksperymentu bez skalowania danych. Skalowanie nie miało wpływu na zwiększenie tego wskaznika.
+
+```{r}
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(pokemon$Type.1, pokemon_ex_1.kmeans_Sc$cluster)
+```
+Widzimy, że jakość grupowania również nie jest wysoka, ale wyniki grupowania są inne od poprzedniego eksperymentu bez skalowania.
+
+```{r}
+# zróbmy wykres z pogrupowanymi danymi używając 2 pierwsze atrybuty
+plot(pokemon_ex_1[1:2], col = pokemon_ex_1.kmeans_Sc$cluster)
+```
+
+```{r}
+#dla eksperymentu teraz do grupowania weźmiemy dataset z 3 atrybutami.
+#dla zwiększenia skuteczności grupowania dane zeskalujemy i  wykonamy jeszcze raz grupowanie.
+set.seed(1111)
+pokemon_ex_2_Scale <- scale(pokemon_ex_2, center = FALSE)
+pokemon_ex_2_Scale <- as.data.frame(pokemon_ex_2_Scale)
+pokemon_ex_2.kmeans_Sc = kmeans(pokemon_ex_2_Scale, 18, iter.max = 20,nstart = 20)
+print(pokemon_ex_2.kmeans_Sc)
+```
+Wskaźnik between_SS / total_SS równia się 85.8 % i jest już lepszy od poprzednich eksperymentów. Zmniejszenie ilości atrybutów miało wpływ na zwiększenie tego wskaźnika.
+
+```{r}
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(pokemon$Type.1, pokemon_ex_2.kmeans_Sc$cluster)
+```
+Jakość grupowania również nie jest zadowoląca.
+
+```{r}
+# zróbmy wykres z pogrupowanymi danymi używając 2 pierwsze atrybuty
+plot(pokemon_ex_2[1:2], col = pokemon_ex_2.kmeans_Sc$cluster)
+```
+Z wykresu możemy zobaczyć, że otrzymaliśmy inne grupy pokemonów w porównaniu do datasetu z 6 atrybutami. 
+Dla kolejnych eksperymentów zostawimy dataset z 3 atrybutami.
+
+## Znajdowanie optymalnej liczby grup za pomocą metody 'łokcia'
+```{r}
+# dla eksperymentu wylosujemy 25% obiektów ze zbioru danych z 3 atrybutami.
+set.seed(1)
+pokemon_ex1_25 <- pokemon_ex_2_Scale[sample(1:nrow(pokemon_ex_2_Scale), length(pokemon_ex_2_Scale$HP)*0.25, replace = FALSE),]
+print(head(pokemon_ex1_25))
+```
+
+```{r}
+# Inicjalizujemy całkowitą sumę błędu kwadratowego: wss
+wss <- 0
+# Od 1 do 15 grup
+for (i in 1:15) 
+{
+  km.out <- kmeans(pokemon_ex1_25, centers = i, nstart=20)
+  # Zapisujemy całkowitą sume błędu kwadratowego do zmiennej wss
+  wss[i] <- km.out$tot.withinss
+}
+
+# Narysujmy całkowitą sume błędu kwadratowego względem liczby grup
+plot(1:15, wss, type = "b",  xlab = "Liczba grup", ylab = "Suma błędu kwadratowego wewnątrz grup")
+```
+Przełamanie jest na liczbie grup równej 2. Więć możemy założyć, że optymalna liczba grup jest 2-4 wg tego wykresu
+
+```{r}
+#Całkowita suma błędu kwadratowego
+wss
+```
+
+
+```{r}
+# znajdowanie optymalnej liczby grup za pomocą metody 'łokcia' dla innego datasetu, dla którego też wylosujemy 25% danych
+set.seed(45)
+pokemon_ex2_25 <- pokemon_ex_2_Scale[sample(1:nrow(pokemon_ex_2_Scale), length(pokemon_ex_2_Scale$HP)*0.25, replace = FALSE),]
+print(head(pokemon_ex2_25))
+```
+```{r}
+wss <- 0
+for (i in 1:15) 
+{
+  km.out <- kmeans(pokemon_ex2_25, centers = i, nstart=20)
+  wss[i] <- km.out$tot.withinss
+}
+plot(1:15, wss, type = "b",  xlab = "Liczba grup", ylab = "Suma błędu kwadratowego wewnątrz grup")
+```
+Z tego wykresu widać, że mamy inne wyniki w porównaniu do poprzedniego wykresu, ale optymalna ilość grup jest taka sama. 
+
+```{r}
+#całkowita suma błędu kwadratowego
+wss
+```
+## wyznaczymy optymalną ilość grup metodą silhouette
+```{r}
+?fviz_nbclust
+# wyznaczymy optymalną ilość grup metodą silhouette
+fviz_nbclust(pokemon_ex2_25, pam, method = "silhouette")+theme_classic()
+```
+Z metody "łokcia" oraz z metody "silhouette" wyszło, że optymalna ilość grup jest 2.
+
+## Dalej zrobimy grupowanie za pomocą różnych algorytmów z podziałem na 2 grupy na pełnym zbiorze danych z 3 atrybutami
+```{r}
+algs = c("Hartigan-Wong", "Lloyd", "Forgy","MacQueen")
+par(mfrow = c(2, 2))
+set.seed(1)
+for(i in 1:4)
+{
+  pokemon_ex3.kmeans.S = kmeans(pokemon_ex_2_Scale, 2,nstart = 1, algorithm = algs[i] )
+  plot(pokemon_ex_2_Scale[1:2], col = pokemon_ex3.kmeans.S$cluster, 
+       main = paste(pokemon_ex3.kmeans.S$tot.withinss, algs[i]), 
+       xlab = "", ylab = "")
+  points(pokemon_ex3.kmeans.S$centers[,1:2], col = 1:3, pch = 8, cex=2)
+}
+```
+Otrzymane wskaźniki nieznacznie się różnią.
+
+```{r}
+#Popatrzmy, jak pokemony zostały podzilone na grupy.
+table(pokemon$Type.1, pokemon_ex3.kmeans.S$cluster)
+```
+Widzimy, że nawet kilka typów pokemonów nie zostało przedzielone całkiem do jednej grupy. Zasadą podziału jest podział na "słabe" i "silne" pokemony. 
+
+
+## Podział na 2 grupy wykorzystając partitioning around medoids
+```{r}
+set.seed(1)
+pam.res <- pam(pokemon_ex_2_Scale, 2)
+```
+
+## Wydrukujmy wyniki grupowania z informacją o tym, które obiekty stanowią centry utworzonych grup
+```{r}
+print(pam.res)
+```
+W pierszej grupie to jest obiekt z ID 757, w drugiej obiekt z ID 631
+
+```{r}
+#wyświetlimy informacje o centrach grup
+print(pam.res$id.med)
+print(pam.res$medoids)
+print(pam.res$clusinfo)
+```
+
+## Dodamy do zbioru danych informację o przynależności obiektów do utworzonych grup
+```{r}
+pokemon$Group <-pam.res$cluster
+head(pokemon, 10)
+```
+## Wizualizacja wyników
+```{r}
+
+fviz_cluster(pam.res,
+             palette = c("#00AFBB", "#FC4E07"), 
+             ellipse.type = "t", 
+             repel = TRUE, 
+             ggtheme = theme_light()
+)
+```
+
+## Ocena jakości grupowania przy użyciu indeksu Silhouette (wskaźnika sylwetkowego)
+```{r}
+set.seed(1)
+km_alt<-eclust(pokemon_ex_2_Scale, "kmeans", k=2, graph=TRUE)
+fviz_silhouette(km_alt, palette="jco")
+```
+
+```{r}
+silinfo<-km_alt$silinfo
+#długości wsk. sylwetkowego dla każdej obserwacji
+head(silinfo$widths[,1:3],10)
+```
+
+```{r}
+#Długości wsk. sylwetkowego dla każdej grupy
+silinfo$clus.avg.widths
+#średnia długość wsk. sylw.
+silinfo$avg.width
+```
+Średnia wartość wskaźnika sylwetkowego jest ok. 0,36. Wg interpretacji Kaufmana i Rousseeuwa to jest słaba struktura grupowania i sugerowane jest zastosowania innej metody grupowania. Wg nich poprawna struktura grupowania jest, gdy średnia wartość wskaźnika jest od 0,5 do 0,7 oraz silna struktura grupowania, gdy wskaźnik > 0,7.
+
+```{r}
+#Sprawdzamy, dla których wartości index Silhouette przyjmuje wartości niższe od zera
+sil <- silinfo$widths[,1:3]
+neg_index <- which(sil[, 'sil_width'] < 0)
+neg_sil <- sil[neg_index,  , drop = FALSE]
+print(head(neg_sil))
+```
+```{r}
+print(nrow(neg_sil)/nrow(pokemon_ex_2_Scale))
+```
+
+Wg indeksu Silhouette do pierwszej grupy zostało źle przedzielone ok. 6.5% obserwacji (wartości indeksu mniejsze od 0). Druga grupa wygląda lepiej, bo do niej nie zostało źle przedzielone żadnej obserwacji. 
+
+
+# Grupowanie gęstościowe: algorytm dbscan
+
+```{r}
+set.seed(112)
+pokemon_ex3_25 <- pokemon_ex_1_Scale[sample(1:nrow(pokemon_ex_1_Scale), length(pokemon_ex_2_Scale$HP)*0.25, replace = FALSE),]
+print(head(pokemon_ex3_25)) #zbior danych z 6 atrybutami
+pokemon_ex4_25 <- pokemon_ex_2_Scale[sample(1:nrow(pokemon_ex_2_Scale), length(pokemon_ex_2_Scale$HP)*0.25, replace = FALSE),]
+print(head(pokemon_ex4_25)) #zbior danych z 3 atrybutami
+```
+
+## Wyznaczamy parametr eps dla algorytmu DBSCAN metodą szukania punktu przegięcia z wykorzystaniem 25% losowo wybranych danych dla wartości k = 4, 5 dla zbioru danych z 3 oraz 6 atrybutami
+```{r}
+#k=4; zbior danych z 6 atrybutami
+dbscan::kNNdistplot(pokemon_ex3_25, k=4)
+abline(h=0.9, lty="dashed")
+```
+```{r}
+#k=5; zbior danych z 6 atrybutami
+dbscan::kNNdistplot(pokemon_ex3_25, k=5)
+abline(h=0.9, lty="dashed")
+```
+Otrzymaliśmy wartość wskaznika eps = 0.9, gdy k=4 lub k=5.
+
+```{r}
+#k=4; zbior danych z 3 atrybutami
+dbscan::kNNdistplot(pokemon_ex4_25, k=4)
+abline(h=0.45, lty="dashed")
+```
+```{r}
+#k=5; zbior danych z 3 atrybutami
+dbscan::kNNdistplot(pokemon_ex4_25, k=5)
+abline(h=0.5, lty="dashed")
+```
+Otrzymaliśmy wartość wskaznika eps = 0.45, gdy k=4 lub k=5
+
+## Wykonanie algorytmu dbscan dla pełnego zbioru danych z 6 atrybutami z parametrami eps=0,9 oraz k = 4
+```{r}
+pokemon.dbscan_eps0.8 <- dbscan::dbscan(pokemon_ex_1_Scale, eps=0.8, minPts=4)
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+#grupa 0 oznacza szum
+table(pokemon$Type.1, pokemon.dbscan_eps0.8$cluster)
+```
+Otrzymaliśmy tylko jeden klaster oraz szum
+
+## Wykonanie algorytmu dbscan dla pełnego zbioru danych z 6 atrybutami z parametrami eps=0,9 oraz k=5
+```{r}
+pokemon.dbscan_eps0.9 <- dbscan::dbscan(pokemon_ex_1_Scale, eps=0.9, minPts=5)
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(pokemon$Type.1, pokemon.dbscan_eps0.9$cluster)
+```
+Otrzymaliśmy podobne wyniki jak z eksperymentu powyżej - jeden klaster oraz szum.
+
+## Wykonanie algorytmu dbscan dla pełnego zbioru danych z 3 atrybutami z parametrami eps=0,4 oraz k=4
+```{r}
+pokemon.dbscan_eps0.4 <- dbscan::dbscan(pokemon_ex_2_Scale, eps=0.4, minPts=4)
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(pokemon$Type.1, pokemon.dbscan_eps0.4$cluster)
+```
+Otrzymaliśmy jeden klaster oraz szum
+
+## Wykonanie algorytmu dbscan dla pełnego zbioru danych z 3 atrybutami z parametrami eps=0,5 oraz k=5
+```{r}
+pokemon.dbscan_eps0.5 <- dbscan::dbscan(pokemon_ex_2_Scale, eps=0.5, minPts=5)
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(pokemon$Type.1, pokemon.dbscan_eps0.5$cluster)
+```
+Otrzymaliśmy jeden klaster oraz szum. Wyniki z eksperymentów powyżej z 3 oraz z 6 atrybutami są bardzo podobne. Niektóre eksperymentach wyszło mniej szumu, w innych - więcej.
+
+## Wizualizacja grupowania ostatniego eksperymentu
+```{r}
+plot(pokemon.dbscan_eps0.5, pokemon_ex_2_Scale[1:2])
+```
+```{r}
+plotcluster(pokemon_ex_2_Scale, pokemon.dbscan_eps0.5$cluster)
+```
+
+## Ocena jakości grupowania przy użyciu indeksu Silhouette (wskaźnika sylwetkowego)
+```{r}
+sil <- silhouette(pokemon.dbscan_eps0.5$cluster, dist(pokemon_ex_2_Scale))
+fviz_silhouette(sil, palette="jco")
+```
+Średnia wartośc wskaznika sylwetkowego jest 0,67. Wg interpetacji Kaufmana i Rousseeuwa to jest poprawna struktura grupowania. Czyli dla tego zbioru danych wg metody dbscan jest wskazany jeden claster do grupowania.
+
+
+## Dodamy do zbioru danych informacji o przynależności obiektów do utworzonych grup
+```{r}
+pokemon$Group_dbscan <- pokemon.dbscan_eps0.5$cluster
+head(pokemon, 10)
+```
+
+```{r}
+pokemon.dbscan_eps0.5
+```
+
+# Porównanie wyników uzyskanych dwoma metodami grupowania
+
+```{r}
+?cluster.stats
+sapply(list(kmeans<-pokemon_ex3.kmeans.S$cluster, dbscan<-pokemon.dbscan_eps0.5$cluster), 
+       function(c) cluster.stats(dist(pokemon_ex_2_Scale),c)[c("within.cluster.ss","avg.silwidth")])
+```
+Z otrzymanych wyników nie można jednoznacznie powiedzieć, która metoda do grupowania do danego zbioru danych jest lepsza. Wg mnie metoda dbscan jest lepsza, bo wskaźnik sylwetkowy jest prawie 2 razy większy, niż w metodzie kmeans. Wskaźnik 'suma kwadratów odległości' jest mniejszy w metodzie kmeans. To nam mówi, że obiekty w metodzie kmeans w otrzymanych grupach bardziej podobne do siebie.
+
+#Wnioski:
+1. Po wykonaniu grupowania metodą kmeans oraz metodą dbscan otrzymaliśmy niezadowolące wyniki. Uważam, że ten zbiór danych nie jest dobry do podziału na typy pokemonów wg ich parametrów. Pokemony różnych typów mają podobne charakterystyki, co nie daje nam możliwości poprawnie podzielić je na grupy, używając różnych metod grupowania.
+2. W pierwotnym zbiorze danych pokemony są podzielone na 18 typów. Używając metody kmeans otrzymaliśmy tylko 2 grupy, a metody dbscan - 1. Uważam, że metoda dbscan dla danego zbioru pokazała lepszy wynik, bo jak napisałem wyżej, nie jest możliwe dla danego zbioru danych odróżnienie jednego typu pokemonów od drugiego, trzeciego itd. Więc 1 claster, który uzyskaliśmy za pomocą metody dbscan, jest poprawny wynik. Poprawność mojego wniosku można sprawdzić, gdy popatrzymy na przypisane numery grup z metody kmeans w oryginalnym datasecie. Pokemony tego samego typu przypisane do różnych grup. Co mówi nam, że tem podział jest bezsensowny w tym przypadku. To można zobaczyć niżej:
+            1  2
+  Bug      47 22
+  Dark     14 17
+  Dragon    7 25
+  Electric 27 17
+  Fairy    10  7
+  Fighting 10 17
+  Fire     23 29
+  Flying    1  3
+  Ghost    18 14
+  Grass    39 31
+  Ground   13 19
+  Ice      13 11
+  Normal   58 40
+  Poison   15 13
+  Psychic  33 24
+  Rock     12 32
+3. Do oceny grupowania został zastosowany wskaźnik sylwetkowy (index Silhouette). W metodzie dbscan wartość tego wskaźnika równa się 0.67, co wg interpretacji Kaufmana i Rousseeuwa jest poprawny podział zbioru danych. W metodzie kmeans ten wskaznik jest równy 0,36. To jest słaba struktura grupowania. W przypadku słabej struktury grupowania sugeruje się zastosowanie innej metody grupowania.
+4. Metoda kmeans podzieliła pokemony na 'słabe' i 'mocne' ze względu na ich parametry (szybki, silny itd.), dlatego dostaliśmy 2 grupy. To widać z centrów grup, które bardzo się różnią:
+      ID        HP    Attack   Defense
+[1,] 757 0.7176068 0.6319145 0.6608525
+[2,] 631 1.0831801 1.1117014 1.0224510
